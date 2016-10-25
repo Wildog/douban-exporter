@@ -45,7 +45,7 @@ def new_task():
     err = parameters_check(username, category)
     if err:
         return err
-    username = username.lower()
+    username = username.lower().rstrip('/')
     stc = state_check(username, category)
     if stc:
         return stc
@@ -79,7 +79,7 @@ def get_state():
     err = parameters_check(username, category)
     if err:
         return err
-    username = username.lower()
+    username = username.lower().rstrip('/')
     rv = {}
     state = states[category].get(username)
     if not state:
