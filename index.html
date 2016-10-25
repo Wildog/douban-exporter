@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width" />
+        <link rel="stylesheet" href="assets/bootstrap.min.css" type="text/css" media="all" />
+        <link rel="stylesheet" href="assets/bootstrap-select.min.css" type="text/css" media="all" />
+        <script src="assets/jquery-3.1.1.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="assets/bootstrap.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="assets/bootstrap-select.min.js" type="text/javascript" charset="utf-8"></script>
+        <style type="text/css">
+        body {
+            font-family: "PingFang SC", "Source Han Sans CN", "Source Han Sans SC", "Heiti SC", "Microsoft YaHei", "Helvetica", "Arial";
+            -webkit-font-smoothing: antialiased;
+        }
+#douban {
+            color: #217F2F
+        }
+        .title {
+            letter-spacing: 2px;
+            margin-bottom: 15px;
+        }
+        .alert {
+            margin: 10px 0 0 0;
+            display: none;
+        }
+#userid {
+            min-width: 150px;
+        }
+        .msg {
+            line-height: 24px;
+        }
+        .love {
+            margin: 15px 3px;
+            font-family: "Courier New", "Courier";
+            font-size: 14px;
+        }
+        .heart {
+            font-size: 11px;
+        }
+        .vertical-center {
+            min-height: 95%;
+            min-height: 95vh;
+            display: flex;
+            align-items: center;
+        }
+#caveat-a, #caveat-b , .love {
+            -webkit-transition: all .8s ease;
+            -moz-transition: all .8s ease;
+            -o-transition: all .8s ease;
+            -ms-transition: all .8s ease;
+            transition: all .8s ease;
+        }
+        .blur {
+            -webkit-filter:blur(10px) grayscale(1);-moz-filter:blur(10px) grayscale(1);-o-filter:blur(10px) grayscale(1);-ms-filter:blur(10px) grayscale(1);filter:blur(10px) grayscale(1);opacity:0;
+        }
+        .glyphicon.spinning {
+            animation: spin 1s infinite linear;
+            -webkit-animation: spin2 1s infinite linear;
+        }
+        @keyframes spin {
+            from { transform: scale(1) rotate(0deg); }
+            to { transform: scale(1) rotate(360deg); }
+        }
+        @-webkit-keyframes spin2 {
+            from { -webkit-transform: rotate(0deg); }
+            to { -webkit-transform: rotate(360deg); }
+        }
+        </style>
+        <title>豆瓣数据导出 | Douban Exporter</title>
+    </head>
+    <body>
+        <div class="container vertical-center">
+            <div>
+                <div class="title"><h1><span id="douban">豆瓣</span>数据导出</h1></div>
+                <div class="form-inline">
+                    <div class="form-group">
+                        <div class="input-group">
+                            <div class="input-group-addon">https://www.douban.com/people/</div>
+                            <input type="text" class="form-control" id="userid" placeholder="用户 ID">
+                            <select id="category" class="selectpicker show-tick">
+                                <option value="movie" data-icon="glyphicon-film">电影</option>
+                                <option value="music" data-icon="glyphicon-music">音乐</option>
+                                <option value="book" data-icon="glyphicon-book">读书</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" id="export" class="btn btn-success">导出 Excel</button>
+                    <div class="alert fade in alert-info alert-dismissible" id="movie-alert">
+                        <button type="button" class="close">&times;</button>
+                        <strong class="msg" id="movie-msg">等候响应中...</strong>
+                    </div>
+                    <div class="alert fade in alert-info alert-dismissible" id="music-alert">
+                        <button type="button" class="close">&times;</button>
+                        <strong class="msg" id="music-msg">等候响应中...</strong>
+                    </div>
+                    <div class="alert fade in alert-info alert-dismissible" id="book-alert">
+                        <button type="button" class="close">&times;</button>
+                        <strong class="msg" id="book-msg">等候响应中...</strong>
+                    </div>
+                    <div class="love blur">Made with <i class="heart glyphicon glyphicon-heart"></i> by <a href="http://wil.dog" target="_blank">Wildog</a>, <span id="caveat-a">for personal use only</span><span id="caveat-b" class="blur">do not abuse</span></div>
+                </div>
+            </div>
+        </div>
+    <script type="text/javascript">  
+    setTimeout(function(){
+        $(".love").removeClass("blur");
+        setTimeout(function(){
+            $("#caveat-a").addClass("blur");
+            setTimeout(function() {
+                $("#caveat-a").remove();
+                $("#caveat-b").removeClass("blur");
+            }, 400)
+        }, 2000);
+    }, 0);
+    function handler(result, username, category) {
+        board = "#" + category + "-msg";
+        alerter = "#" + category + "-alert";
+        if (result["type"] == "error") {
+            $(alerter).removeClass("alert-info alert-danger alert-success");
+            $(alerter).addClass("alert-danger");
+            $(board).text(result["msg"]);
+        } else if (result["type"] == "info") {
+            $(alerter).removeClass("alert-info alert-danger alert-success");
+            $(alerter).addClass("alert-info");
+            $(board).html('<span class="glyphicon glyphicon-refresh spinning"></span> ' + result["msg"] + '<br>抓取较慢, 可以离开或关闭页面等会再来哦, 服务器会在后台继续为你导出');
+            setTimeout(function(){
+                $.ajax({  
+                    url:"http://121.42.176.74:8000/getState",  
+                    dataType:"jsonp",  
+                    data:{"username": username, "category": category},  
+                    jsonp:"callback",  
+                    success:function(result){
+                        handler(result, username, category);
+                    },
+                    error:function(){
+                        $(board).html('服务器可能 Down 了, 重新点击导出试试, 持续报错请联系<a href="https://douban.com/people/randyzew" target="_blank">我</a>');
+                        $(alerter).removeClass("alert-info alert-danger alert-success");
+                        $(alerter).addClass("alert-danger");
+                    },
+                    timeout:5000  
+                });
+            }, 1000);
+        } else if (result["type"] == "done") {
+            $(alerter).removeClass("alert-info alert-danger alert-success");
+            $(alerter).addClass("alert-success");
+            url = result["file_url"]
+                $(board).html(result["msg"] + ': <a href="http://121.42.176.74:8000/getFile?filename=' + url + '">' + url + '</a>');
+        }
+    }
+    $('#userid').keypress(function(e){
+        if (e.keyCode == 13) {
+            $('#export').click();
+        }
+    });
+    $("#export").click(function(){
+        var username = $("#userid").val();
+        var category = $("#category").val();
+        board = "#" + category + "-msg";
+        alerter = "#" + category + "-alert";
+        if (!username) {
+            $(board).text("记得输入用户 ID 哟");
+        } else {
+            $(board).html('<span class="glyphicon glyphicon-refresh spinning"></span> 等候响应中...');
+        }
+        $(alerter).slideDown(400, function() {
+            if (username) {
+                $.ajax({  
+                    url:"http://121.42.176.74:8000/addTask",  
+                    dataType:"jsonp",  
+                    data:{"username": username, "category": category},  
+                    jsonp:"callback",  
+                    success:function(result){
+                        handler(result, username, category);
+                    },
+                    error:function(){
+                        $(board).html('服务器可能 Down 了, 重新点击导出试试, 持续报错请联系<a href="https://douban.com/people/randyzew" target="_blank">我</a>');
+                        $(alerter).removeClass("alert-info alert-danger alert-success");
+                        $(alerter).addClass("alert-danger");
+                    },
+                    timeout:5000  
+                })
+            }
+        })
+    })
+    $(".close").click(function(){
+        $(this).parent().slideUp(400, function() {
+        })
+    })
+    </script>
+    </body>
+</html>
