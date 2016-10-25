@@ -2,7 +2,7 @@
 from flask import Flask, Response, request, send_file, current_app
 from bs4 import BeautifulSoup
 from Queue import Queue
-from threading import Thread, Timer
+from threading import Thread, Timer, Lock
 from datetime import datetime, timedelta
 from functools import wraps
 import urllib2
@@ -244,7 +244,8 @@ def add_workflow(username, category, itype, sheet):
 
 def export(username, itype):
     global current_tasks
-    current_tasks += 1
+    with lock:
+        current_tasks += 1
     filename = username + '_' + itype + '_' + datetime.now().strftime('%y_%m_%d_%H_%M') + '.xlsx'
     path = os.path.join(SHEETS_DIR, filename)
     sheet_types ={'movie': MovieSheet, 'music': MusicSheet, 'book': BookSheet}
@@ -253,7 +254,8 @@ def export(username, itype):
         add_workflow(username, category, itype, sheet)
     sheet.save()
     states[itype][username] = 'done,' + filename
-    current_tasks -= 1
+    with lock:
+        current_tasks -= 1
 
 def clear_files():
     Timer(60.0, clear_files).start()
@@ -795,4 +797,5 @@ if __name__ == '__main__':
     logging.basicConfig(filename='exporter.log', format='%(asctime)s %(message)s', level=logging.WARNING)
     BIDS = gen_bids()
     clear_files()
+    lock = Lock()
     app.run('0.0.0.0', 8000, threaded=True, debug=True)
