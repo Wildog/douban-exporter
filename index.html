@@ -123,10 +123,10 @@
         } else if (result["type"] == "info") {
             $(alerter).removeClass("alert-info alert-danger alert-success");
             $(alerter).addClass("alert-info");
-            $(board).html('<span class="glyphicon glyphicon-refresh spinning"></span> ' + result["msg"] + '<br>抓取较慢, 可以离开或关闭页面等会再来哦, 服务器会在后台继续为你导出');
+            $(board).html('<span class="glyphicon glyphicon-refresh spinning"></span> ' + result["msg"] + '<br>抓取较慢, 可以离开或关闭页面, 六小时以内再回来看看哦, 服务器会在后台继续为你导出');
             setTimeout(function(){
                 $.ajax({  
-                    url:"http://121.42.176.74:8000/getState",  
+                    url:"http://127.0.0.1:8000/getState",  
                     dataType:"jsonp",  
                     data:{"username": username, "category": category},  
                     jsonp:"callback",  
@@ -145,7 +145,7 @@
             $(alerter).removeClass("alert-info alert-danger alert-success");
             $(alerter).addClass("alert-success");
             url = result["file_url"]
-                $(board).html(result["msg"] + ': <a href="http://121.42.176.74:8000/getFile?filename=' + url + '">' + url + '</a>');
+                $(board).html(result["msg"] + ': <a href="http://127.0.0.1:8000/getFile?filename=' + url + '">' + url + '</a>');
         }
     }
     $('#userid').keypress(function(e){
@@ -166,7 +166,7 @@
         $(alerter).slideDown(400, function() {
             if (username) {
                 $.ajax({  
-                    url:"http://121.42.176.74:8000/addTask",  
+                    url:"http://127.0.0.1:8000/addTask",  
                     dataType:"jsonp",  
                     data:{"username": username, "category": category},  
                     jsonp:"callback",  

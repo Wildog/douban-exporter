@@ -107,11 +107,7 @@ def get_file():
         res.headers.add('Content-Disposition', 'attachment; filename="' + filename + '"')
         return res
     else:
-        rv = {}
-        rv['msg'] = '文件不存在, 请尝试重新导出'
-        rv['type'] = 'error'
-        res = Response(json.dumps(rv), mimetype='application/json')
-        return res
+        return '导出完成已超过六小时, 文件已失效, 请尝试重新导出'
 
 def parameters_check(username, category):
     rv = {}
