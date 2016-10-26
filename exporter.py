@@ -10,7 +10,6 @@ import xlsxwriter
 import logging
 import random
 import json
-import time
 import os
 import re
 
@@ -209,6 +208,8 @@ def get_urls(username, category, queue, itype, start=0):
         if date:
             rv['date'] = date.string.split()[0] if itype == 'book' else date.string
         if comment:
+            if itype == 'music':
+                comment = comment.next_element
             rv['comment'] = comment.string.strip()
         if category in ['/collect', '/do']:
             rated = date.previous_sibling.previous_sibling
@@ -216,8 +217,9 @@ def get_urls(username, category, queue, itype, start=0):
                 rv['rated'] = '%.1f' % (int(rated['class'][0][6]) * 2.0)
         queue.put(rv)
     if (start + 15) < count:
-        time.sleep(0.5)
-        get_urls(username, category, queue, itype, start=start + 15)
+        Thread(target=get_urls, args=(username, category, queue, itype,), kwargs={'start': start + 15}).start()
+    else:
+        queue.close()
 
 def add_workflow(username, category, itype, sheet):
     urls_queue = ClosableQueue()
@@ -236,7 +238,6 @@ def add_workflow(username, category, itype, sheet):
         thread.start()
 
     get_urls(username, category, urls_queue, itype)
-    urls_queue.close()
     urls_queue.join()
     details_queue.close()
     details_queue.join()
