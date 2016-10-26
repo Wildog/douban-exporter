@@ -204,11 +204,16 @@ def get_urls(username, category, queue, itype, start=0):
               'type': itype, 'category': category,
               'index': idx + start, 'total': count}
         date = item.find('span', class_='date')
-        comment = item.find('span', class_='comment')
+        if itype == 'movie':
+            comment = item.find('span', class_='comment')
+        elif itype == 'book':
+            comment = item.find('p', class_='comment')
+        elif itype == 'music':
+            comment = item.find('span', class_='date').parent.next_sibling.next_sibling
         if date:
             rv['date'] = date.string.split()[0] if itype == 'book' else date.string
         if comment:
-            rv['comment'] = comment.string
+            rv['comment'] = comment.string.strip()
         if category in ['/collect', '/do']:
             rated = date.previous_sibling.previous_sibling
             if rated:
