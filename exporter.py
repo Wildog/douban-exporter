@@ -186,40 +186,48 @@ def stash_error(func):
             return rv
     return wrapper
 
-@stash_error
 def get_urls(username, category, queue, itype, start=0):
-    page = urlopen('https://' + itype + '.douban.com/people/' + username + category + '?start=' + str(start))
-    soup = BeautifulSoup(page, 'html.parser')
-    count = soup.find('span', class_='subject-num').string
-    count = int(count.split(u'\xa0')[-1].strip())
-    items = soup.find_all('li', class_='subject-item') if itype == 'book' else soup.find_all('div', class_='item')
-    for idx, item in enumerate(items, 1):
-        url = item.find('h2').find('a') if itype == 'book' else item.find('li', class_='title').find('a')
-        rv = {'url': url.get('href'), 'username': username,
-              'type': itype, 'category': category,
-              'index': idx + start, 'total': count}
-        date = item.find('span', class_='date')
-        if itype == 'movie':
-            comment = item.find('span', class_='comment')
-        elif itype == 'book':
-            comment = item.find('p', class_='comment')
-        elif itype == 'music':
-            comment = item.find('span', class_='date').parent.next_sibling.next_sibling
-        if date:
-            rv['date'] = date.string.split()[0] if itype == 'book' else date.string
-        if comment:
-            if itype == 'music':
-                comment = comment.next_element
-            rv['comment'] = comment.string.strip()
-        if category in ['/collect', '/do']:
-            rated = date.previous_sibling.previous_sibling
-            if rated:
-                rv['rated'] = '%.1f' % (int(rated['class'][0][6]) * 2.0)
-        queue.put(rv)
-    if (start + 15) < count:
-        Thread(target=get_urls, args=(username, category, queue, itype,), kwargs={'start': start + 15}).start()
+    try:
+        page = urlopen('https://' + itype + '.douban.com/people/' + username + category + '?start=' + str(start))
+        soup = BeautifulSoup(page, 'html.parser')
+        count = soup.find('span', class_='subject-num').string
+        count = int(count.split(u'\xa0')[-1].strip())
+        items = soup.find_all('li', class_='subject-item') if itype == 'book' else soup.find_all('div', class_='item')
+    except Exception as get_list_err:
+        logging.error('get_list_err: ' + repr(get_list_err))
+        count = start + 15 + 1
     else:
-        queue.close()
+        for idx, item in enumerate(items, 1):
+            try:
+                url = item.find('h2').find('a') if itype == 'book' else item.find('li', class_='title').find('a')
+                rv = {'url': url.get('href'), 'username': username,
+                      'type': itype, 'category': category,
+                      'index': idx + start, 'total': count}
+                date = item.find('span', class_='date')
+                if itype == 'movie':
+                    comment = item.find('span', class_='comment')
+                elif itype == 'book':
+                    comment = item.find('p', class_='comment')
+                elif itype == 'music':
+                    comment = item.find('span', class_='date').parent.next_sibling.next_sibling
+                if date:
+                    rv['date'] = date.string.split()[0] if itype == 'book' else date.string
+                if comment:
+                    if itype == 'music':
+                        comment = comment.next_element
+                    rv['comment'] = comment.string.strip()
+                if category in ['/collect', '/do']:
+                    rated = date.previous_sibling.previous_sibling
+                    if rated:
+                        rv['rated'] = '%.1f' % (int(rated['class'][0][6]) * 2.0)
+                queue.put(rv)
+            except Exception as list_item_parse_err:
+                logging.error('list_item_parse_err: ' + repr(list_item_parse_err))
+    finally:
+        if (start + 15) < count:
+            Thread(target=get_urls, args=(username, category, queue, itype,), kwargs={'start': start + 15}).start()
+        else:
+            queue.close()
 
 def add_workflow(username, category, itype, sheet):
     urls_queue = ClosableQueue()
