@@ -200,7 +200,7 @@ def get_urls(username, category, queue, itype, start=0):
         count = int(count.split(u'\xa0')[-1].strip())
         items = soup.find_all('li', class_='subject-item') if itype == 'book' else soup.find_all('div', class_='item')
     except Exception as get_list_err:
-        logging.error('[GET_LIST_ERROR] %s, %s, %s, %d : %s' + (username, category, itype, start, get_list_err))
+        logging.error('[GET_LIST_ERROR] %s, %s, %s, %d : %s' % (username, category, itype, start, get_list_err))
         count = start + 15 + 1
     else:
         for idx, item in enumerate(items, 1):
@@ -228,7 +228,7 @@ def get_urls(username, category, queue, itype, start=0):
                         rv['rated'] = '%.1f' % (int(rated['class'][0][6]) * 2.0)
                 queue.put(rv)
             except Exception as list_item_parse_err:
-                logging.error('[LIST_ITEM_PARSE_ERR] %s, %s, %s, %d at page %d : %s' + (username, category, itype, idx, start, list_item_parse_err))
+                logging.error('[LIST_ITEM_PARSE_ERR] %s, %s, %s, %d at page %d : %s' % (username, category, itype, idx, start, list_item_parse_err))
     finally:
         if (start + 15) < count:
             Thread(target=get_urls, args=(username, category, queue, itype,), kwargs={'start': start + 15}).start()
