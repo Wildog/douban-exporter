@@ -63,6 +63,8 @@ def new_task():
         res = Response(json.dumps(rv), mimetype='application/json')
         return res
     else:
+        ip = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+        logging.warning('[NEW TASK] request from ' + ip + ', ' + username + ', ' + category)
         Thread(target=export, args=(username, category,)).start()
         rv['msg'] = '任务开始中...'
         states[category][username] = rv['msg']
@@ -107,6 +109,10 @@ def get_file():
         return res
     else:
         return '导出完成已超过六小时, 文件已失效, 请尝试重新导出'
+
+@app.route('/serverStat', methods=['GET'])
+def server_stat():
+    return Response(json.dumps(states), mimetype='application/json')
 
 def parameters_check(username, category):
     rv = {}
@@ -180,7 +186,7 @@ def stash_error(func):
             logging.warning(func.__name__ + str(args) + str(kwargs) + str(e.code) + e.reason)
             return rv
         except Exception as e:
-            logging.error(repr(e))
+            logging.error(func.__name__ + str(args) + str(kwargs) + str(e))
             return rv
         else:
             return rv
@@ -194,7 +200,7 @@ def get_urls(username, category, queue, itype, start=0):
         count = int(count.split(u'\xa0')[-1].strip())
         items = soup.find_all('li', class_='subject-item') if itype == 'book' else soup.find_all('div', class_='item')
     except Exception as get_list_err:
-        logging.error('get_list_err: ' + repr(get_list_err))
+        logging.error('[GET_LIST_ERROR] %s, %s, %s, %d : %s' + (username, category, itype, start, get_list_err))
         count = start + 15 + 1
     else:
         for idx, item in enumerate(items, 1):
@@ -222,7 +228,7 @@ def get_urls(username, category, queue, itype, start=0):
                         rv['rated'] = '%.1f' % (int(rated['class'][0][6]) * 2.0)
                 queue.put(rv)
             except Exception as list_item_parse_err:
-                logging.error('list_item_parse_err: ' + repr(list_item_parse_err))
+                logging.error('[LIST_ITEM_PARSE_ERR] %s, %s, %s, %d at page %d : %s' + (username, category, itype, idx, start, list_item_parse_err))
     finally:
         if (start + 15) < count:
             Thread(target=get_urls, args=(username, category, queue, itype,), kwargs={'start': start + 15}).start()
