@@ -232,7 +232,7 @@ def get_urls(username, category, queue, itype, start=0):
 def add_workflow(username, category, itype, sheet):
     urls_queue = ClosableQueue()
     details_queue = ClosableQueue()
-    sheet_queue = ClosableQueue()
+    sheet_queue = ClosableQueue(maxsize=0)
 
     fetchers = {'movie': get_movie_details,
                 'music': get_music_details,
@@ -280,6 +280,9 @@ def clear_files():
 
 class ClosableQueue(Queue):
     SENTINEL = object()
+
+    def __init__(self, maxsize=50):
+        Queue.__init__(self, maxsize=maxsize)
 
     def close(self):
         self.put(self.SENTINEL)
