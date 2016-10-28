@@ -156,7 +156,7 @@ def cache_check(username, category):
 def user_exists(username):
     try:
         urlopen('https://movie.douban.com/people/' + username)
-    except urllib2.HTTPError as e:
+    except:
         return False
     else:
         return True
