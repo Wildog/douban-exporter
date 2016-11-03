@@ -229,6 +229,7 @@ def get_urls(username, category, queue, itype, start=0):
                 queue.put(rv)
             except Exception as list_item_parse_err:
                 logging.error('[LIST_ITEM_PARSE_ERR] %s, %s, %s, %d at page %d : %s' % (username, category, itype, idx, start, list_item_parse_err))
+                continue
     finally:
         if (start + 15) < count:
             Thread(target=get_urls, args=(username, category, queue, itype,), kwargs={'start': start + 15}).start()
