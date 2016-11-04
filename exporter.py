@@ -166,7 +166,7 @@ def urlopen(url):
     req.add_header('User-Agent', 'Baiduspider')
     req.add_header('Cookie', 'bid="%s"' % random.choice(BIDS))
     req.add_header('Accept-Language', 'zh-CN,zh')
-    return urllib2.urlopen(req)
+    return urllib2.urlopen(req, timeout=10)
 
 def gen_bids():
     bids = []
