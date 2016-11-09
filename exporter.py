@@ -10,6 +10,8 @@ import xlsxwriter
 import logging
 import random
 import json
+import time
+import ssl
 import os
 import re
 
@@ -161,12 +163,33 @@ def user_exists(username):
     else:
         return True
 
+def retry(tries=3, delay=1, backoff=2):
+    def deco_retry(f):
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except urllib2.HTTPError, e:
+                    raise e
+                except (urllib2.URLError, ssl.SSLError) as e:
+                    msg = "%s %s %s: %s, Retrying in %d seconds..." % (f.__name__, str(args), str(kwargs), str(e), mdelay)
+                    logging.warning(msg)
+                    time.sleep(mdelay)
+                    mtries -= 1
+                    mdelay *= backoff
+            return f(*args, **kwargs)
+        return f_retry
+    return deco_retry
+
+@retry(tries=3, delay=1, backoff=2)
 def urlopen(url):
     req = urllib2.Request(url)
     req.add_header('User-Agent', 'Baiduspider')
     req.add_header('Cookie', 'bid="%s"' % random.choice(BIDS))
     req.add_header('Accept-Language', 'zh-CN,zh')
-    return urllib2.urlopen(req, timeout=10)
+    return urllib2.urlopen(req, timeout=5)
 
 def gen_bids():
     bids = []
@@ -177,18 +200,17 @@ def gen_bids():
         bids.append("".join(bid))
     return bids
 
-def stash_error(func):
+def log_exception(func):
+    @wraps(func)
     def wrapper(*args, **kwargs):
         rv = None
         try:
             rv = func(*args, **kwargs)
         except urllib2.HTTPError as e:
             logging.warning(func.__name__ + str(args) + str(kwargs) + str(e.code) + e.reason)
-            return rv
         except Exception as e:
             logging.error(func.__name__ + str(args) + str(kwargs) + str(e))
-            return rv
-        else:
+        finally:
             return rv
     return wrapper
 
@@ -247,8 +269,8 @@ def add_workflow(username, category, itype, sheet):
     appenders = {'/collect': sheet.append_to_collect_sheet,
                  '/wish': sheet.append_to_wish_sheet,
                  '/do': sheet.append_to_do_sheet}
-    threads = [StoppableWorker(stash_error(fetchers[itype]), urls_queue, details_queue),
-               StoppableWorker(stash_error(appenders[category]), details_queue, sheet_queue)]
+    threads = [StoppableWorker(log_exception(fetchers[itype]), urls_queue, details_queue),
+               StoppableWorker(log_exception(appenders[category]), details_queue, sheet_queue)]
     for thread in threads:
         thread.start()
 
