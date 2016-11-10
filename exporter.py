@@ -2,7 +2,8 @@
 from flask import Flask, Response, request, send_file, current_app
 from bs4 import BeautifulSoup
 from Queue import Queue
-from threading import Thread, Timer, Lock
+from threading import Thread, Timer
+from multiprocessing import Process, Manager
 from datetime import datetime, timedelta
 from functools import wraps
 import urllib2
@@ -16,10 +17,8 @@ import os
 import re
 
 app = Flask(__name__)
-states = {'movie': {}, 'music': {}, 'book': {}}
 SHEETS_DIR = 'sheets'
 TTL = 21600
-current_tasks = 0
 MAX_CONCURRENT_TASKS = 6
 BID_LEN = 20
 BID_LIST_LEN = 500
@@ -54,7 +53,9 @@ def new_task():
     if cache:
         return cache
     rv = {}
-    if current_tasks >= MAX_CONCURRENT_TASKS:
+    with count_lock:
+        current_count = current_tasks.value
+    if current_count >= MAX_CONCURRENT_TASKS:
         rv['msg'] = '同时间正在导出数据的人太多了, 待会儿再来吧'
         rv['type'] = 'error'
         res = Response(json.dumps(rv), mimetype='application/json')
@@ -67,9 +68,10 @@ def new_task():
     else:
         ip = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
         logging.warning('[NEW TASK] request from ' + ip + ', ' + username + ', ' + category)
-        Thread(target=export, args=(username, category,)).start()
+        Process(target=export, args=(username, category,)).start()
         rv['msg'] = '任务开始中...'
-        states[category][username] = rv['msg']
+        with locks[category]:
+            states[category][username] = rv['msg']
         rv['type'] = 'info'
         res = Response(json.dumps(rv), mimetype='application/json')
         return res
@@ -84,7 +86,8 @@ def get_state():
         return err
     username = username.lower().strip('/ ')
     rv = {}
-    state = states[category].get(username)
+    with locks[category]:
+        state = states[category].get(username)
     if not state:
         rv['msg'] = 'No state for this user on this category'
         rv['type'] = 'error'
@@ -94,7 +97,8 @@ def get_state():
         rv['msg'] = '任务完成'
         rv['type'] = 'done'
         rv['file_url'] = state.split(',')[-1]
-        del states[category][username]
+        with locks[category]:
+            del states[category][username]
     else:
         rv['msg'] = state
         rv['type'] = 'info'
@@ -114,7 +118,11 @@ def get_file():
 
 @app.route('/serverStat', methods=['GET'])
 def server_stat():
-    return Response(json.dumps(states), mimetype='application/json')
+    serializable_states = {}
+    for category, state in states.items():
+        with locks[category]:
+            serializable_states[category] = state.copy()
+    return Response(json.dumps(serializable_states), mimetype='application/json')
 
 def parameters_check(username, category):
     rv = {}
@@ -131,13 +139,15 @@ def parameters_check(username, category):
 
 def state_check(username, category):
     rv = {}
-    state = states.get(category, {}).get(username)
+    with locks[category]:
+        state = states.get(category, {}).get(username)
     if state:
         if state.startswith('done'):
             rv['msg'] = '任务完成'
             rv['type'] = 'done'
             rv['file_url'] = state.split(',')[-1]
-            del states[category][username]
+            with locks[category]:
+                del states[category][username]
         else:
             rv['msg'] = '任务已在进行中...'
             rv['type'] = 'info'
@@ -285,8 +295,9 @@ def add_workflow(username, category, itype, sheet):
 
 def export(username, itype):
     global current_tasks
-    with lock:
-        current_tasks += 1
+    with count_lock:
+        current_tasks.value += 1
+    logging.warning('[NEW PROCESS ADDED, pid: %d]' % os.getpid())
     filename = username + '_' + itype + '_' + datetime.now().strftime('%y_%m_%d_%H_%M') + '.xlsx'
     path = os.path.join(SHEETS_DIR, filename)
     sheet_types ={'movie': MovieSheet, 'music': MusicSheet, 'book': BookSheet}
@@ -294,9 +305,10 @@ def export(username, itype):
     for category in ['/collect', '/wish', '/do']:
         add_workflow(username, category, itype, sheet)
     sheet.save()
-    states[itype][username] = 'done,' + filename
-    with lock:
-        current_tasks -= 1
+    with locks[itype]:
+        states[itype][username] = 'done,' + filename
+    with count_lock:
+        current_tasks.value -= 1
 
 def clear_files():
     Timer(60.0, clear_files).start()
@@ -474,7 +486,8 @@ class MovieSheet(object):
 
 def get_movie_details(data):
     categories = {'/collect': '看过的电影', '/wish': '想看的电影', '/do': '在看的电视剧'}
-    states[data['type']][data['username']] = '正在获取' + categories[data['category']] + '信息: '\
+    with locks[data['type']]:
+        states[data['type']][data['username']] = '正在获取' + categories[data['category']] + '信息: '\
                                             + str(data['index']) + ' / ' + str(data['total'])
     rv = data
     url = data.get('url')
@@ -639,7 +652,8 @@ class MusicSheet(object):
 
 def get_music_details(data):
     categories = {'/collect': '听过的音乐', '/wish': '想听的音乐', '/do': '在听的音乐'}
-    states[data['type']][data['username']] = '正在获取' + categories[data['category']] + '信息: '\
+    with locks[data['type']]:
+        states[data['type']][data['username']] = '正在获取' + categories[data['category']] + '信息: '\
                                             + str(data['index']) + ' / ' + str(data['total'])
     rv = data
     url = data.get('url')
@@ -806,7 +820,8 @@ class BookSheet(object):
 
 def get_book_details(data):
     categories = {'/collect': '看过的书籍', '/wish': '想看的书籍', '/do': '在看的书籍'}
-    states[data['type']][data['username']] = '正在获取' + categories[data['category']] + '信息: '\
+    with locks[data['type']]:
+        states[data['type']][data['username']] = '正在获取' + categories[data['category']] + '信息: '\
                                             + str(data['index']) + ' / ' + str(data['total'])
     rv = data
     url = data.get('url')
@@ -839,7 +854,17 @@ def get_book_details(data):
 
 if __name__ == '__main__':
     logging.basicConfig(filename='exporter.log', format='%(asctime)s %(message)s', level=logging.WARNING)
+    manager = Manager()
+    current_tasks = manager.Value('i', 0)
+    movie_states = manager.dict()
+    music_states = manager.dict()
+    book_states = manager.dict()
+    count_lock = manager.Lock()
+    movie_lock = manager.Lock()
+    music_lock = manager.Lock()
+    book_lock = manager.Lock()
+    states = {"movie": movie_states, "music": music_states, "book": book_states}
+    locks = {"movie": movie_lock, "music": music_lock, "book": book_lock}
     BIDS = gen_bids()
     clear_files()
-    lock = Lock()
-    app.run('0.0.0.0', 8000, threaded=True, debug=True)
+    app.run('0.0.0.0', 8000)
