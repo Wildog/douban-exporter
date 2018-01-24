@@ -672,11 +672,11 @@ def get_music_details(data):
         rv['rating'] = rating.string
     if votes:
         rv['votes'] = votes.string
-    if rlabel:
-        rv['rlabel'] = rlabel.next_sibling.string
-    if rdate:
+    if rlabel.next_element:
+        rv['rlabel'] = rlabel.next_element.string
+    if rdate.next_element:
         rv['rdate'] = rdate.next_element.string.strip()
-    if genre:
+    if genre.next_element:
         rv['genre'] = genre.next_element.string.strip()
     if artists:
         artists = artists.parent.find_all('a')
@@ -840,11 +840,11 @@ def get_book_details(data):
         rv['rating'] = rating.string
     if votes:
         rv['votes'] = votes.string
-    if press:
+    if press.next_element:
         rv['press'] = press.next_element.string.strip()
-    if rdate:
+    if rdate.next_element:
         rv['rdate'] = rdate.next_element.string.strip()
-    if page:
+    if page.next_element:
         rv['page'] = page.next_element.string.strip()
     if authors:
         authors = authors.parent.parent.find_all('a')
