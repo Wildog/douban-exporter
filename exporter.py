@@ -366,9 +366,9 @@ class MovieSheet(object):
         self.do_sheet = self.workbook.add_worksheet(u'在看的电视剧')
 
         collect_do_sheet_header = [u'片名', u'导演', u'评分', u'评分人数', u'我的评分',
-                                   u'我的评语', u'标记日期', u'上映日期', u'时长', u'类型']
+                                   u'我的评语', u'标记日期', u'上映日期', u'时长', u'类型', u'imdb']
         wish_sheet_header = [u'片名', u'导演', u'评分', u'评分人数', u'标记日期',
-                             u'上映日期', u'时长', u'类型']
+                             u'上映日期', u'时长', u'类型', u'imdb']
 
         self.collect_sheet.set_column(0, 0, 30)
         self.collect_sheet.set_column(1, 1, 20)
@@ -410,7 +410,8 @@ class MovieSheet(object):
                     movie.get('rating'), movie.get('votes'),
                     movie.get('rated'), movie.get('comment'),
                     movie.get('date'), movie.get('rdate'),
-                    movie.get('runtime'), movie.get('genres')]
+                    movie.get('runtime'), movie.get('genres'),
+                    movie.get('imdb')]
             for col, item in enumerate(info):
                 if col == 0:
                     self.collect_sheet.write_url(self.collect_sheet_row, col, item[1], self.link_format, item[0])
@@ -436,7 +437,8 @@ class MovieSheet(object):
                     movie.get('rating'), movie.get('votes'),
                     movie.get('rated'), movie.get('comment'),
                     movie.get('date'), movie.get('rdate'),
-                    movie.get('runtime'), movie.get('genres')]
+                    movie.get('runtime'), movie.get('genres'),
+                    movie.get('imdb')]
             for col, item in enumerate(info):
                 if col == 0:
                     self.do_sheet.write_url(self.do_sheet_row, col, item[1], self.link_format, item[0])
@@ -461,7 +463,8 @@ class MovieSheet(object):
             info = [[movie.get('title'), movie.get('url')], movie.get('directors'),
                     movie.get('rating'), movie.get('votes'),
                     movie.get('date'), movie.get('rdate'),
-                    movie.get('runtime'), movie.get('genres')]
+                    movie.get('runtime'), movie.get('genres'),
+                    movie.get('imdb')]
             for col, item in enumerate(info):
                 if col == 0:
                     self.wish_sheet.write_url(self.wish_sheet_row, col, item[1], self.link_format, item[0])
@@ -500,6 +503,7 @@ def get_movie_details(data):
     rdate = soup.find('span', attrs={'property': 'v:initialReleaseDate'})
     directors = soup.find_all('a', attrs={'rel': 'v:directedBy'})
     genres = soup.find_all('span', attrs={'property': 'v:genre'})
+    imdb = soup.find(href=re.compile("http://www.imdb.com/title/."))
     rv['title'] = title.string
     if rating:
         rv['rating'] = rating.string
@@ -513,6 +517,8 @@ def get_movie_details(data):
         rv['directors'] = ' / '.join([director.string for director in directors])
     if genres:
         rv['genres'] = ' / '.join([genre.string for genre in genres])
+    if imdb:
+        rv['imdb'] = imdb.string
     logging.info(title.string)
     return rv
 
