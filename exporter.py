@@ -154,7 +154,7 @@ def parameters_check(username, category):
         rv['type'] = 'error'
         res = Response(json.dumps(rv), mimetype='application/json')
         return res
-    if category not in ['movie', 'music', 'book']:
+    if category not in ['movie', 'music', 'book', 'game']:
         rv['msg'] = 'Please provide a category'
         rv['type'] = 'error'
         res = Response(json.dumps(rv), mimetype='application/json')
@@ -265,12 +265,20 @@ def log_exception(func):
 def get_urls(username, subtype, queue, category, start=0, end=0):
     rounded_start = int(start) / 15 * 15
     try:
-        page = urlopen('https://' + category + '.douban.com/people/' + username + subtype + '?start=' + str(rounded_start))
-        soup = BeautifulSoup(page, 'html.parser')
-        count = soup.find('span', class_='subject-num').string
-        count = int(count.split(u'\xa0')[-1].strip())
-        count = min(count, end) if end != 0 else count
-        items = soup.find_all('li', class_='subject-item') if category == 'book' else soup.find_all('div', class_='item')
+        if category == 'game':
+            page = urlopen('https://www.douban.com/people/' + username + '/games?action=' + subtype[1:] + '&start=' + str(rounded_start))
+            soup = BeautifulSoup(page, 'html.parser')
+            count = soup.find('div', class_='info').find('h1').string
+            count = int(count.split(u'\x28')[-1][:-1])
+            count = min(count, end) if end != 0 else count
+            items = soup.find_all('div', class_='common-item')
+        else:
+            page = urlopen('https://' + category + '.douban.com/people/' + username + subtype + '?start=' + str(rounded_start))
+            soup = BeautifulSoup(page, 'html.parser')
+            count = soup.find('span', class_='subject-num').string
+            count = int(count.split(u'\xa0')[-1].strip())
+            count = min(count, end) if end != 0 else count
+            items = soup.find_all('li', class_='subject-item') if category == 'book' else soup.find_all('div', class_='item')
     except Exception as get_list_err:
         logging.error('[GET_LIST_ERROR] %s, %s, %s, %d : %s' % (username, subtype, category, rounded_start, get_list_err))
         count = rounded_start + 15 + 1
@@ -279,7 +287,12 @@ def get_urls(username, subtype, queue, category, start=0, end=0):
             if rounded_start + idx < start or rounded_start + idx > count:
                 continue
             try:
-                url = item.find('h2').find('a') if category == 'book' else item.find('li', class_='title').find('a')
+                if category == 'book':
+                    url = item.find('h2').find('a')
+                elif category == 'game':
+                    url = item.find('div', class_='title').find('a')
+                else:
+                    url = item.find('li', class_='title').find('a')
                 rv = {'url': url.get('href'), 'username': username,
                       'category': category, 'subtype': subtype,
                       'index': rounded_start + idx, 'total': count}
@@ -290,22 +303,29 @@ def get_urls(username, subtype, queue, category, start=0, end=0):
                     comment = item.find('p', class_='comment')
                 elif category == 'music':
                     comment = item.find('span', class_='date').parent.next_sibling.next_sibling
+                    if comment:
+                        comment = comment.next_element
+                elif category == 'game':
+                    comment = item.find('div', class_='desc').next_sibling.next_sibling
                 if date:
                     rv['date'] = date.string.split()[0] if category == 'book' else date.string
-                if comment:
-                    if category == 'music':
-                        comment = comment.next_element
+                if comment and comment.string:
                     rv['comment'] = comment.string.strip()
                 if subtype in ['/collect', '/do']:
                     rated = date.previous_sibling.previous_sibling
                     if rated:
-                        rv['rated'] = '%.1f' % (int(rated['class'][0][6]) * 2.0)
+                        class_idx = 1 if category == 'game' else 0
+                        num_idx = 7 if category == 'game' else 6
+                        rated_num = rated['class'][class_idx][num_idx]
+                        if rated_num.isdigit():
+                            rv['rated'] = '%.1f' % (int(rated_num) * 2.0)
                 queue.put(rv)
             except Exception as list_item_parse_err:
-                logging.error('[LIST_ITEM_PARSE_ERR] %s, %s, %s, %d at page %d : %s' % (username, subtype, category, idx, start, list_item_parse_err))
+                logging.error('[LIST_ITEM_PARSE_ERR] %s, %s, %s, %d at start %d : %s' % (username, subtype, category, idx, start, list_item_parse_err))
                 continue
     finally:
         if (rounded_start + 15) < count:
+            time.sleep(random.uniform(AVG_DELAY / 2.0, AVG_DELAY))
             Thread(target=get_urls, args=(username, subtype, queue, category,), kwargs={'start': rounded_start + 15, 'end': end}).start()
         else:
             queue.close()
@@ -317,7 +337,8 @@ def add_workflow(username, category, subtype, sheet, data_range=[0, 0]):
 
     fetchers = {'movie': get_movie_details,
                 'music': get_music_details,
-                'book': get_book_details}
+                'book': get_book_details,
+                'game': get_game_details}
     appenders = {'/collect': sheet.append_to_collect_sheet,
                  '/wish': sheet.append_to_wish_sheet,
                  '/do': sheet.append_to_do_sheet}
@@ -351,7 +372,7 @@ def export(username, category, subtypes={}):
         prefix = prefix + ''.join([str(i) for i in subtypes['/do']])
     filename = prefix + '_' + datetime.now().strftime('%y_%m_%d_%H_%M') + '.xlsx'
     path = os.path.join(SHEETS_DIR, filename)
-    sheet_types ={'movie': MovieSheet, 'music': MusicSheet, 'book': BookSheet}
+    sheet_types ={'movie': MovieSheet, 'music': MusicSheet, 'book': BookSheet, 'game': GameSheet}
     sheet = sheet_types[category](path)
     for subtype, data_range in subtypes.iteritems():
         if (int(data_range[2]) == 1):
@@ -731,11 +752,11 @@ def get_music_details(data):
         rv['rating'] = rating.string
     if votes:
         rv['votes'] = votes.string
-    if rlabel is not None and rlabel.next_element:
+    if rlabel and rlabel.next_element:
         rv['rlabel'] = rlabel.next_element.string
-    if rdate is not None and rdate.next_element:
+    if rdate and rdate.next_element:
         rv['rdate'] = rdate.next_element.string.strip()
-    if genre is not None and genre.next_element:
+    if genre and genre.next_element:
         rv['genre'] = genre.next_element.string.strip()
     if artists:
         artists = artists.parent.find_all('a')
@@ -900,15 +921,188 @@ def get_book_details(data):
         rv['rating'] = rating.string
     if votes:
         rv['votes'] = votes.string
-    if press is not None and press.next_element:
+    if press and press.next_element:
         rv['press'] = press.next_element.string.strip()
-    if rdate is not None and rdate.next_element:
+    if rdate and rdate.next_element:
         rv['rdate'] = rdate.next_element.string.strip()
-    if page is not None and page.next_element:
+    if page and page.next_element:
         rv['page'] = page.next_element.string.strip()
     if authors:
         authors = authors.parent.parent.find_all('a')
         rv['authors'] = ' / '.join([author.string for author in authors])
+    logging.info(str(data['index']) + ' / ' + str(data['total']) + ' ' + title.string)
+    time.sleep(random.uniform(AVG_DELAY / 2.0, AVG_DELAY * 2.0))
+    return rv
+
+
+class GameSheet(object):
+    def __init__(self, name):
+        self.workbook = xlsxwriter.Workbook(name, {'constant_memory': True})
+
+        self.link_format = self.workbook.add_format({'color': 'blue', 'underline': 1})
+        self.bold_format = self.workbook.add_format({'bold': True})
+        self.under_4_format = self.workbook.add_format({'bg_color': '#E54D42', 'bold': True})
+        self.under_6_format = self.workbook.add_format({'bg_color': '#E6A243', 'bold': True})
+        self.under_8_format = self.workbook.add_format({'bg_color': '#29BB9C', 'bold': True})
+        self.under_10_format = self.workbook.add_format({'bg_color': '#39CA74', 'bold': True})
+
+        self.collect_sheet = self.workbook.add_worksheet(u'玩过的游戏')
+        self.wish_sheet = self.workbook.add_worksheet(u'想玩的游戏')
+        self.do_sheet = self.workbook.add_worksheet(u'在玩的游戏')
+
+        collect_do_sheet_header = [u'游戏名', u'类型', u'评分', u'评分人数', u'我的评分',
+                                   u'我的评语', u'标记日期', u'上市日期', u'开发商', u'平台']
+        wish_sheet_header = [u'游戏名', u'类型', u'评分', u'评分人数',
+                             u'标记日期', u'上市日期', u'开发商', u'平台']
+
+        self.collect_sheet.set_column(0, 0, 25)
+        self.collect_sheet.set_column(1, 1, 25)
+        self.collect_sheet.set_column(5, 5, 30)
+        self.collect_sheet.set_column(6, 6, 12)
+        self.collect_sheet.set_column(7, 7, 12)
+        self.collect_sheet.set_column(8, 8, 25)
+        self.collect_sheet.set_column(9, 9, 20)
+
+        self.do_sheet.set_column(0, 0, 25)
+        self.do_sheet.set_column(1, 1, 25)
+        self.do_sheet.set_column(5, 5, 30)
+        self.do_sheet.set_column(6, 6, 12)
+        self.do_sheet.set_column(7, 7, 12)
+        self.do_sheet.set_column(8, 8, 25)
+        self.do_sheet.set_column(9, 9, 20)
+
+        self.wish_sheet.set_column(0, 0, 25)
+        self.wish_sheet.set_column(1, 1, 25)
+        self.wish_sheet.set_column(4, 4, 12)
+        self.wish_sheet.set_column(5, 5, 12)
+        self.wish_sheet.set_column(6, 6, 25)
+        self.wish_sheet.set_column(7, 7, 20)
+
+        for col, item in enumerate(collect_do_sheet_header):
+            self.collect_sheet.write(0, col, item)
+            self.do_sheet.write(0, col, item)
+
+        for col, item in enumerate(wish_sheet_header):
+            self.wish_sheet.write(0, col, item)
+
+        self.collect_sheet_row = 1
+        self.do_sheet_row = 1
+        self.wish_sheet_row = 1
+
+    def append_to_collect_sheet(self, game):
+        if game:
+            info = [[game.get('title'), game.get('url')], game.get('genre'),
+                    game.get('rating'), game.get('votes'),
+                    game.get('rated'), game.get('comment'),
+                    game.get('date'), game.get('rdate'),
+                    game.get('developer'), game.get('platform')]
+            for col, item in enumerate(info):
+                if col == 0:
+                    self.collect_sheet.write_url(self.collect_sheet_row, col, item[1], self.link_format, item[0])
+                elif col == 2 or col == 4:
+                    fmt = self.bold_format
+                    if item and item.strip() != '':
+                        if float(item) < 4.0:
+                            fmt = self.under_4_format
+                        elif float(item) < 6.0:
+                            fmt = self.under_6_format
+                        elif float(item) < 8.0:
+                            fmt = self.under_8_format
+                        else:
+                            fmt = self.under_10_format
+                    self.collect_sheet.write(self.collect_sheet_row, col, item, fmt)
+                else:
+                    self.collect_sheet.write(self.collect_sheet_row, col, item)
+            self.collect_sheet_row += 1
+
+    def append_to_do_sheet(self, game):
+        if game:
+            info = [[game.get('title'), game.get('url')], game.get('genre'),
+                    game.get('rating'), game.get('votes'),
+                    game.get('rated'), game.get('comment'),
+                    game.get('date'), game.get('rdate'),
+                    game.get('developer'), game.get('platform')]
+            for col, item in enumerate(info):
+                if col == 0:
+                    self.do_sheet.write_url(self.do_sheet_row, col, item[1], self.link_format, item[0])
+                elif col == 2 or col == 4:
+                    fmt = self.bold_format
+                    if item and item.strip() != '':
+                        if float(item) < 4.0:
+                            fmt = self.under_4_format
+                        elif float(item) < 6.0:
+                            fmt = self.under_6_format
+                        elif float(item) < 8.0:
+                            fmt = self.under_8_format
+                        else:
+                            fmt = self.under_10_format
+                    self.do_sheet.write(self.do_sheet_row, col, item, fmt)
+                else:
+                    self.do_sheet.write(self.do_sheet_row, col, item)
+            self.do_sheet_row += 1
+
+    def append_to_wish_sheet(self, game):
+        if game:
+            info = [[game.get('title'), game.get('url')], game.get('genre'),
+                    game.get('rating'), game.get('votes'),
+                    game.get('date'), game.get('rdate'),
+                    game.get('developer'), game.get('platform')]
+            for col, item in enumerate(info):
+                if col == 0:
+                    self.wish_sheet.write_url(self.wish_sheet_row, col, item[1], self.link_format, item[0])
+                elif col == 2:
+                    fmt = self.bold_format
+                    if item and item.strip() != '':
+                        if float(item) < 4.0:
+                            fmt = self.under_4_format
+                        elif float(item) < 6.0:
+                            fmt = self.under_6_format
+                        elif float(item) < 8.0:
+                            fmt = self.under_8_format
+                        else:
+                            fmt = self.under_10_format
+                    self.wish_sheet.write(self.wish_sheet_row, col, item, fmt)
+                else:
+                    self.wish_sheet.write(self.wish_sheet_row, col, item)
+            self.wish_sheet_row += 1
+
+    def save(self):
+        self.workbook.close()
+
+def get_game_details(data):
+    subtypes = {'/collect': '玩过的游戏', '/wish': '想玩的游戏', '/do': '在玩的游戏'}
+    with locks[data['category']]:
+        states[data['category']][data['username']] = '正在获取' + subtypes[data['subtype']] + '信息: '\
+                                            + str(data['index']) + ' / ' + str(data['total'])
+    rv = data
+    url = data.get('url')
+    page = urlopen(url)
+    soup = BeautifulSoup(page, 'html.parser')
+    title = soup.find('div', id='content').find('h1')
+    rating = soup.find('strong', class_='rating_num')
+    votes = soup.find('span', attrs={'property': 'v:votes'})
+    info = soup.find('dl', class_='game-attr')
+    developer = info.find(text=re.compile(ur'开发商', re.UNICODE))
+    rdate = info.find(text=re.compile(ur'发行日期', re.UNICODE))
+    if rdate is None:
+        rdate = info.find(text=re.compile(ur'预计上市时间', re.UNICODE))
+    platform = info.find(text=re.compile(ur'平台', re.UNICODE))
+    genre = info.find(text=re.compile(ur'类型', re.UNICODE))
+    rv['title'] = title.string
+    if rating:
+        rv['rating'] = rating.string
+    if votes:
+        rv['votes'] = votes.string
+    if developer and developer.next_element.next_element:
+        rv['developer'] = developer.next_element.next_element.string.strip()
+    if rdate and rdate.next_element.next_element:
+        rv['rdate'] = rdate.next_element.next_element.string.strip()
+    if platform and platform.next_element.next_element:
+        platforms = platform.next_element.next_element.find_all('a')
+        rv['platform'] = ' / '.join([p.string for p in platforms])
+    if genre and genre.next_element.next_element:
+        genres = genre.next_element.next_element.find_all('a')
+        rv['genre'] = ' / '.join([g.string for g in genres])
     logging.info(str(data['index']) + ' / ' + str(data['total']) + ' ' + title.string)
     time.sleep(random.uniform(AVG_DELAY / 2.0, AVG_DELAY * 2.0))
     return rv
@@ -920,12 +1114,14 @@ if __name__ == '__main__':
     movie_states = manager.dict()
     music_states = manager.dict()
     book_states = manager.dict()
+    game_states = manager.dict()
     count_lock = manager.Lock()
     movie_lock = manager.Lock()
     music_lock = manager.Lock()
     book_lock = manager.Lock()
-    states = {"movie": movie_states, "music": music_states, "book": book_states}
-    locks = {"movie": movie_lock, "music": music_lock, "book": book_lock}
+    game_lock = manager.Lock()
+    states = {"movie": movie_states, "music": music_states, "book": book_states, "game": game_states}
+    locks = {"movie": movie_lock, "music": music_lock, "book": book_lock, "game": game_lock}
     BIDS = gen_bids()
     clear_files()
     if CUSTOM_COOKIE:

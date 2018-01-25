@@ -91,6 +91,7 @@
                                 <option value="movie" data-icon="glyphicon-film">电影</option>
                                 <option value="music" data-icon="glyphicon-music">音乐</option>
                                 <option value="book" data-icon="glyphicon-book">读书</option>
+                                <option value="game" data-icon="glyphicon-tower">游戏</option>
                             </select>
                         </div>
                     </div>
@@ -135,6 +136,10 @@
                     <div class="alert fade in alert-info alert-dismissible" id="book-alert">
                         <button type="button" class="close">&times;</button>
                         <strong class="msg" id="book-msg">等候响应中...</strong>
+                    </div>
+                    <div class="alert fade in alert-info alert-dismissible" id="game-alert">
+                        <button type="button" class="close">&times;</button>
+                        <strong class="msg" id="game-msg">等候响应中...</strong>
                     </div>
                     <div class="love blur">Made with <i class="heart glyphicon glyphicon-heart"></i> by <a href="http://wil.dog" target="_blank">Wildog</a>, <span id="caveat-a">for personal use only</span><span id="caveat-b" class="blur">do not abuse</span></div>
                 </div>
@@ -186,10 +191,10 @@
                 $(board).html(result["msg"] + ': <a href="http://127.0.0.1:8000/getFile?filename=' + url + '">' + url + '</a>');
         }
     }
-    var categorySubtypes = {'movie': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}, 'music': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}, 'book': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}}; 
+    var categorySubtypes = {'movie': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}, 'music': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}, 'book': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}, 'game': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}}; 
     $("#category").change(function(){
         var category = $("#category").val();
-        var verbs = {"movie": "看", "music": "听", "book": "读"};
+        var verbs = {"movie": "看", "music": "听", "book": "读", "game": "玩"};
         $("#collect-label").text(verbs[category] + "过的");
         $("#wish-label").text("想" + verbs[category] + "的");
         $("#do-label").text("在" + verbs[category] + "的");
