@@ -6,10 +6,13 @@ See this post for details: [http://wil.dog/2016/10/26/the-make-of-douban-exporte
 
 
 ## Requirements
-### Python 2.7
-### `pip install -r requirements.txt`
+### Python 2.7 (Mac/Linux only, not work on Windows)
 
 ## How to Use
-1. Create a directory named `sheets`, it acts like a cache.
+1. Run `pip install -r requirements.txt`
 2. Run `python exporter.py`
 3. Open index.html in the browser
+
+## Extra
+1. You can export your own cookies in LWP Set-Cookie3 format and copy them into `cookies.txt` file to export your private data, but also taking risk of getting your account temporarily banned due to suspicious activities.
+2. You can change AVG_DELAY to a bigger one to avoid getting banned too easily.

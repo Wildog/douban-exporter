@@ -20,7 +20,7 @@
             letter-spacing: 2px;
             margin-bottom: 15px;
         }
-        .alert {
+        .alert, .subtypes-group {
             margin: 10px 0 0 0;
             display: none;
         }
@@ -29,6 +29,15 @@
         }
         .msg {
             line-height: 24px;
+        }
+        .subtypes-group {
+            max-width: 800px;
+        }
+        .subtypes-group .input-group {
+            width: 30%;
+        }
+        .subtypes-group .input-group .form-control {
+            width: 50%;
         }
         .love {
             margin: 15px 3px;
@@ -86,6 +95,35 @@
                         </div>
                     </div>
                     <button type="submit" id="export" class="btn btn-success">导出 Excel</button>
+                    <button id="custom" class="btn btn-primary">高级</button>
+                    <div class="subtypes-group fade in alert alert-warning alert-dismissable">
+                        <div class="input-group">
+                            <div id="collect-label" class="input-group-addon">看过的</div>
+                            <input type="text" id="collect-start" class="form-control">
+                            <input type="text" id="collect-end" class="form-control">
+                            <div class="input-group-addon">
+                                <input type="checkbox" id="collect-checkbox" value="">
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <div id="wish-label" class="input-group-addon">想看的</div>
+                            <input type="text" id="wish-start" class="form-control">
+                            <input type="text" id="wish-end" class="form-control">
+                            <div class="input-group-addon">
+                                <input type="checkbox" id="wish-checkbox" value="">
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <div id="do-label" class="input-group-addon">在看的</div>
+                            <input type="text" id="do-start" class="form-control">
+                            <input type="text" id="do-end" class="form-control">
+                            <div class="input-group-addon">
+                                <input type="checkbox" id="do-checkbox" value="">
+                            </div>
+                        </div>
+                        <button type="button" class="close">&times;</button>
+                        <div style='margin-top: 8px;'>你可以在上面选择需要导出的类目和起止范围，范围设0则为导出全部</div>
+                    </div>
                     <div class="alert fade in alert-info alert-dismissible" id="movie-alert">
                         <button type="button" class="close">&times;</button>
                         <strong class="msg" id="movie-msg">等候响应中...</strong>
@@ -148,6 +186,28 @@
                 $(board).html(result["msg"] + ': <a href="http://127.0.0.1:8000/getFile?filename=' + url + '">' + url + '</a>');
         }
     }
+    var categorySubtypes = {'movie': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}, 'music': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}, 'book': {'/collect': [0, 0, 1], '/wish': [0, 0, 1], '/do': [0, 0, 1]}}; 
+    $("#category").change(function(){
+        var category = $("#category").val();
+        var verbs = {"movie": "看", "music": "听", "book": "读"};
+        $("#collect-label").text(verbs[category] + "过的");
+        $("#wish-label").text("想" + verbs[category] + "的");
+        $("#do-label").text("在" + verbs[category] + "的");
+        $("#collect-start").val(categorySubtypes[category]["/collect"][0]);
+        $("#collect-end").val(categorySubtypes[category]["/collect"][1]);
+        $("#collect-checkbox").prop("checked", categorySubtypes[category]["/collect"][2]);
+        $("#wish-start").val(categorySubtypes[category]["/wish"][0]);
+        $("#wish-end").val(categorySubtypes[category]["/wish"][1]);
+        $("#wish-checkbox").prop("checked", categorySubtypes[category]["/wish"][2]);
+        $("#do-start").val(categorySubtypes[category]["/do"][0]);
+        $("#do-end").val(categorySubtypes[category]["/do"][1]);
+        $("#do-checkbox").prop("checked",categorySubtypes[category]["/do"][2]);
+    });
+    $("#category").change();
+    $("#custom").click(function() {
+        $(".subtypes-group").slideDown(400, function() {
+        });
+    });
     $('#userid').keypress(function(e){
         if (e.keyCode == 13) {
             $('#export').click();
@@ -156,19 +216,36 @@
     $("#export").click(function(){
         var username = $("#userid").val();
         var category = $("#category").val();
+        var param = "";
         board = "#" + category + "-msg";
         alerter = "#" + category + "-alert";
         if (!username) {
             $(board).text("记得输入用户 ID 哟");
         } else {
             $(board).html('<span class="glyphicon glyphicon-refresh spinning"></span> 等候响应中...');
+            categorySubtypes[category]["/collect"] = [$("#collect-start").val(), $("#collect-end").val(), $("#collect-checkbox").prop("checked")];
+            categorySubtypes[category]["/wish"] = [$("#wish-start").val(), $("#wish-end").val(), $("#wish-checkbox").prop("checked")];
+            categorySubtypes[category]["/do"] = [$("#do-start").val(), $("#do-end").val(), $("#do-checkbox").prop("checked")];
+            var subtypes = ["/collect", "/wish", "/do"]
+            for (var j = 0; j < subtypes.length; j++) {
+                var subtype = subtypes[j];
+                for (var i = 0; i < categorySubtypes[category][subtype].length; i++) {
+                    var val = categorySubtypes[category][subtype][i];
+                    if (val === true) {
+                        val = 1;
+                    } else if (val === false) {
+                        val = 0;
+                    }
+                    param = param + val + '_';
+                }
+            }
         }
         $(alerter).slideDown(400, function() {
             if (username) {
                 $.ajax({  
                     url:"http://127.0.0.1:8000/addTask",  
                     dataType:"jsonp",  
-                    data:{"username": username, "category": category},  
+                    data:{"username": username, "category": category, "subtypes": param},  
                     jsonp:"callback",  
                     success:function(result){
                         handler(result, username, category);

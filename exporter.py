@@ -7,6 +7,7 @@ from multiprocessing import Process, Manager
 from datetime import datetime, timedelta
 from functools import wraps
 import urllib2
+import cookielib
 import xlsxwriter
 import logging
 import random
@@ -15,14 +16,28 @@ import time
 import ssl
 import os
 import re
+import sys
 
 app = Flask(__name__)
 SHEETS_DIR = 'sheets'
 TTL = 21600
 MAX_CONCURRENT_TASKS = 6
-BID_LEN = 20
+BID_LEN = 11
 BID_LIST_LEN = 500
 BIDS = []
+CUSTOM_COOKIE = False
+AVG_DELAY = 2.0
+cookies = cookielib.LWPCookieJar('cookies.txt')
+cookies.load()
+for cookie in cookies:
+    if cookie.name == 'bid':
+        CUSTOM_COOKIE = True
+handlers = [
+    urllib2.HTTPHandler(),
+    urllib2.HTTPSHandler(),
+    urllib2.HTTPCookieProcessor(cookies)
+]
+opener = urllib2.build_opener(*handlers)
 
 def jsonp(func):
     @wraps(func)
@@ -42,6 +57,7 @@ def jsonp(func):
 def new_task():
     username = request.args.get('username')
     category = request.args.get('category')
+    subtypes = request.args.get('subtypes')
     err = parameters_check(username, category)
     if err:
         return err
@@ -49,7 +65,14 @@ def new_task():
     stc = state_check(username, category)
     if stc:
         return stc
-    cache = cache_check(username, category)
+    parsed_subtypes = subtypes.rstrip('_').split('_')
+    if (len(parsed_subtypes) != 9):
+        rv['msg'] = '参数有误'
+        rv['type'] = 'error'
+        res = Response(json.dumps(rv), mimetype='application/json')
+        return res
+    subtypes = {'/collect': parsed_subtypes[0:3], '/wish': parsed_subtypes[3:6], '/do': parsed_subtypes[6:9]}
+    cache = cache_check(username, category, subtypes)
     if cache:
         return cache
     rv = {}
@@ -68,7 +91,7 @@ def new_task():
     else:
         ip = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
         logging.warning('[NEW TASK] request from ' + ip + ', ' + username + ', ' + category)
-        Process(target=export, args=(username, category,)).start()
+        Process(target=export, args=(username, category,), kwargs={'subtypes': subtypes}).start()
         rv['msg'] = '任务开始中...'
         with locks[category]:
             states[category][username] = rv['msg']
@@ -149,14 +172,20 @@ def state_check(username, category):
             with locks[category]:
                 del states[category][username]
         else:
-            rv['msg'] = '任务已在进行中...'
+            rv['msg'] = '已有同类任务进行中...'
             rv['type'] = 'info'
         res = Response(json.dumps(rv), mimetype='application/json')
         return res
 
-def cache_check(username, category):
+def cache_check(username, category, subtypes):
     rv = {}
     prefix = username + '_' + category + '_'
+    if subtypes['/collect'] is not None:
+        prefix = prefix + ''.join([str(i) for i in subtypes['/collect']])
+    if subtypes['/wish'] is not None:
+        prefix = prefix + ''.join([str(i) for i in subtypes['/wish']])
+    if subtypes['/do'] is not None:
+        prefix = prefix + ''.join([str(i) for i in subtypes['/do']])
     for filename in os.listdir('sheets'):
         if filename.startswith(prefix):
             rv['msg'] = '此 ID 六小时内已导出过, 请直接下载缓存结果'
@@ -168,7 +197,11 @@ def cache_check(username, category):
 def user_exists(username):
     try:
         urlopen('https://movie.douban.com/people/' + username)
-    except:
+    except urllib2.HTTPError as e:
+        logging.warning(str(e.code) + e.reason)
+        return False
+    except Exception as e:
+        logging.error(str(e))
         return False
     else:
         return True
@@ -196,10 +229,15 @@ def retry(tries=3, delay=1, backoff=2):
 @retry(tries=3, delay=1, backoff=2)
 def urlopen(url):
     req = urllib2.Request(url)
-    req.add_header('User-Agent', 'Baiduspider')
-    req.add_header('Cookie', 'bid="%s"' % random.choice(BIDS))
-    req.add_header('Accept-Language', 'zh-CN,zh')
-    return urllib2.urlopen(req, timeout=5)
+    req.add_header('Accept-Language', 'zh-CN,zh;en-US,en')
+    req.add_header('Referer', 'https://www.douban.com/')
+    if CUSTOM_COOKIE:
+        req.add_header('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36')
+    else:
+        req.add_header('User-Agent', 'Baiduspider')
+        cookie = cookielib.Cookie(None, 'bid', random.choice(BIDS), '80', '80', '.douban.com', None, None, '/', None, False, False, None, None, None, None)
+        cookies.set_cookie(cookie)
+    return opener.open(req, timeout=5)
 
 def gen_bids():
     bids = []
@@ -224,51 +262,55 @@ def log_exception(func):
             return rv
     return wrapper
 
-def get_urls(username, category, queue, itype, start=0):
+def get_urls(username, subtype, queue, category, start=0, end=0):
+    rounded_start = int(start) / 15 * 15
     try:
-        page = urlopen('https://' + itype + '.douban.com/people/' + username + category + '?start=' + str(start))
+        page = urlopen('https://' + category + '.douban.com/people/' + username + subtype + '?start=' + str(rounded_start))
         soup = BeautifulSoup(page, 'html.parser')
         count = soup.find('span', class_='subject-num').string
         count = int(count.split(u'\xa0')[-1].strip())
-        items = soup.find_all('li', class_='subject-item') if itype == 'book' else soup.find_all('div', class_='item')
+        count = min(count, end) if end != 0 else count
+        items = soup.find_all('li', class_='subject-item') if category == 'book' else soup.find_all('div', class_='item')
     except Exception as get_list_err:
-        logging.error('[GET_LIST_ERROR] %s, %s, %s, %d : %s' % (username, category, itype, start, get_list_err))
-        count = start + 15 + 1
+        logging.error('[GET_LIST_ERROR] %s, %s, %s, %d : %s' % (username, subtype, category, rounded_start, get_list_err))
+        count = rounded_start + 15 + 1
     else:
         for idx, item in enumerate(items, 1):
+            if rounded_start + idx < start or rounded_start + idx > count:
+                continue
             try:
-                url = item.find('h2').find('a') if itype == 'book' else item.find('li', class_='title').find('a')
+                url = item.find('h2').find('a') if category == 'book' else item.find('li', class_='title').find('a')
                 rv = {'url': url.get('href'), 'username': username,
-                      'type': itype, 'category': category,
-                      'index': idx + start, 'total': count}
+                      'category': category, 'subtype': subtype,
+                      'index': rounded_start + idx, 'total': count}
                 date = item.find('span', class_='date')
-                if itype == 'movie':
+                if category == 'movie':
                     comment = item.find('span', class_='comment')
-                elif itype == 'book':
+                elif category == 'book':
                     comment = item.find('p', class_='comment')
-                elif itype == 'music':
+                elif category == 'music':
                     comment = item.find('span', class_='date').parent.next_sibling.next_sibling
                 if date:
-                    rv['date'] = date.string.split()[0] if itype == 'book' else date.string
+                    rv['date'] = date.string.split()[0] if category == 'book' else date.string
                 if comment:
-                    if itype == 'music':
+                    if category == 'music':
                         comment = comment.next_element
                     rv['comment'] = comment.string.strip()
-                if category in ['/collect', '/do']:
+                if subtype in ['/collect', '/do']:
                     rated = date.previous_sibling.previous_sibling
                     if rated:
                         rv['rated'] = '%.1f' % (int(rated['class'][0][6]) * 2.0)
                 queue.put(rv)
             except Exception as list_item_parse_err:
-                logging.error('[LIST_ITEM_PARSE_ERR] %s, %s, %s, %d at page %d : %s' % (username, category, itype, idx, start, list_item_parse_err))
+                logging.error('[LIST_ITEM_PARSE_ERR] %s, %s, %s, %d at page %d : %s' % (username, subtype, category, idx, start, list_item_parse_err))
                 continue
     finally:
-        if (start + 15) < count:
-            Thread(target=get_urls, args=(username, category, queue, itype,), kwargs={'start': start + 15}).start()
+        if (rounded_start + 15) < count:
+            Thread(target=get_urls, args=(username, subtype, queue, category,), kwargs={'start': rounded_start + 15, 'end': end}).start()
         else:
             queue.close()
 
-def add_workflow(username, category, itype, sheet):
+def add_workflow(username, category, subtype, sheet, data_range=[0, 0]):
     urls_queue = ClosableQueue()
     details_queue = ClosableQueue()
     sheet_queue = ClosableQueue(maxsize=0)
@@ -279,34 +321,44 @@ def add_workflow(username, category, itype, sheet):
     appenders = {'/collect': sheet.append_to_collect_sheet,
                  '/wish': sheet.append_to_wish_sheet,
                  '/do': sheet.append_to_do_sheet}
-    threads = [StoppableWorker(log_exception(fetchers[itype]), urls_queue, details_queue),
-               StoppableWorker(log_exception(appenders[category]), details_queue, sheet_queue)]
+    threads = [StoppableWorker(log_exception(fetchers[category]), urls_queue, details_queue),
+               StoppableWorker(log_exception(appenders[subtype]), details_queue, sheet_queue)]
     for thread in threads:
         thread.start()
 
-    get_urls(username, category, urls_queue, itype)
+    start = int(data_range[0])
+    end = int(data_range[1])
+    get_urls(username, subtype, urls_queue, category, start, end)
     urls_queue.join()
     details_queue.close()
     details_queue.join()
-    logging.info('all ' + str(sheet_queue.qsize()) + category + ' ' + itype + ' tasks done for ' + username)
+    logging.info('all ' + str(sheet_queue.qsize()) + subtype + ' ' + category + ' tasks done for ' + username)
     del urls_queue
     del details_queue
     del sheet_queue
 
-def export(username, itype):
+def export(username, category, subtypes={}):
     global current_tasks
     with count_lock:
         current_tasks.value += 1
     logging.warning('[NEW PROCESS ADDED, pid: %d]' % os.getpid())
-    filename = username + '_' + itype + '_' + datetime.now().strftime('%y_%m_%d_%H_%M') + '.xlsx'
+    prefix = username + '_' + category + '_'
+    if subtypes['/collect'] is not None:
+        prefix = prefix + ''.join([str(i) for i in subtypes['/collect']])
+    if subtypes['/wish'] is not None:
+        prefix = prefix + ''.join([str(i) for i in subtypes['/wish']])
+    if subtypes['/do'] is not None:
+        prefix = prefix + ''.join([str(i) for i in subtypes['/do']])
+    filename = prefix + '_' + datetime.now().strftime('%y_%m_%d_%H_%M') + '.xlsx'
     path = os.path.join(SHEETS_DIR, filename)
     sheet_types ={'movie': MovieSheet, 'music': MusicSheet, 'book': BookSheet}
-    sheet = sheet_types[itype](path)
-    for category in ['/collect', '/wish', '/do']:
-        add_workflow(username, category, itype, sheet)
+    sheet = sheet_types[category](path)
+    for subtype, data_range in subtypes.iteritems():
+        if (int(data_range[2]) == 1):
+            add_workflow(username, category, subtype, sheet, data_range)
     sheet.save()
-    with locks[itype]:
-        states[itype][username] = 'done,' + filename
+    with locks[category]:
+        states[category][username] = 'done,' + filename
     with count_lock:
         current_tasks.value -= 1
 
@@ -488,9 +540,9 @@ class MovieSheet(object):
         self.workbook.close()
 
 def get_movie_details(data):
-    categories = {'/collect': '看过的电影', '/wish': '想看的电影', '/do': '在看的电视剧'}
-    with locks[data['type']]:
-        states[data['type']][data['username']] = '正在获取' + categories[data['category']] + '信息: '\
+    subtypes = {'/collect': '看过的电影', '/wish': '想看的电影', '/do': '在看的电视剧'}
+    with locks[data['category']]:
+        states[data['category']][data['username']] = '正在获取' + subtypes[data['subtype']] + '信息: '\
                                             + str(data['index']) + ' / ' + str(data['total'])
     rv = data
     url = data.get('url')
@@ -519,7 +571,8 @@ def get_movie_details(data):
         rv['genres'] = ' / '.join([genre.string for genre in genres])
     if imdb:
         rv['imdb'] = imdb.string
-    logging.info(title.string)
+    logging.info(str(data['index']) + ' / ' + str(data['total']) + ' ' + title.string)
+    time.sleep(random.uniform(AVG_DELAY / 2.0, AVG_DELAY * 2.0))
     return rv
 
 class MusicSheet(object):
@@ -657,9 +710,9 @@ class MusicSheet(object):
         self.workbook.close()
 
 def get_music_details(data):
-    categories = {'/collect': '听过的音乐', '/wish': '想听的音乐', '/do': '在听的音乐'}
-    with locks[data['type']]:
-        states[data['type']][data['username']] = '正在获取' + categories[data['category']] + '信息: '\
+    subtypes = {'/collect': '听过的音乐', '/wish': '想听的音乐', '/do': '在听的音乐'}
+    with locks[data['category']]:
+        states[data['category']][data['username']] = '正在获取' + subtypes[data['subtype']] + '信息: '\
                                             + str(data['index']) + ' / ' + str(data['total'])
     rv = data
     url = data.get('url')
@@ -678,16 +731,17 @@ def get_music_details(data):
         rv['rating'] = rating.string
     if votes:
         rv['votes'] = votes.string
-    if rlabel.next_element:
+    if rlabel is not None and rlabel.next_element:
         rv['rlabel'] = rlabel.next_element.string
-    if rdate.next_element:
+    if rdate is not None and rdate.next_element:
         rv['rdate'] = rdate.next_element.string.strip()
-    if genre.next_element:
+    if genre is not None and genre.next_element:
         rv['genre'] = genre.next_element.string.strip()
     if artists:
         artists = artists.parent.find_all('a')
         rv['artists'] = ' / '.join([artist.string for artist in artists])
-    logging.info(title.string)
+    logging.info(str(data['index']) + ' / ' + str(data['total']) + ' ' + title.string)
+    time.sleep(random.uniform(AVG_DELAY / 2.0, AVG_DELAY * 2.0))
     return rv
 
 class BookSheet(object):
@@ -825,9 +879,9 @@ class BookSheet(object):
         self.workbook.close()
 
 def get_book_details(data):
-    categories = {'/collect': '看过的书籍', '/wish': '想看的书籍', '/do': '在看的书籍'}
-    with locks[data['type']]:
-        states[data['type']][data['username']] = '正在获取' + categories[data['category']] + '信息: '\
+    subtypes = {'/collect': '看过的书籍', '/wish': '想看的书籍', '/do': '在看的书籍'}
+    with locks[data['category']]:
+        states[data['category']][data['username']] = '正在获取' + subtypes[data['subtype']] + '信息: '\
                                             + str(data['index']) + ' / ' + str(data['total'])
     rv = data
     url = data.get('url')
@@ -846,20 +900,21 @@ def get_book_details(data):
         rv['rating'] = rating.string
     if votes:
         rv['votes'] = votes.string
-    if press.next_element:
+    if press is not None and press.next_element:
         rv['press'] = press.next_element.string.strip()
-    if rdate.next_element:
+    if rdate is not None and rdate.next_element:
         rv['rdate'] = rdate.next_element.string.strip()
-    if page.next_element:
+    if page is not None and page.next_element:
         rv['page'] = page.next_element.string.strip()
     if authors:
         authors = authors.parent.parent.find_all('a')
         rv['authors'] = ' / '.join([author.string for author in authors])
-    logging.info(title.string)
+    logging.info(str(data['index']) + ' / ' + str(data['total']) + ' ' + title.string)
+    time.sleep(random.uniform(AVG_DELAY / 2.0, AVG_DELAY * 2.0))
     return rv
 
 if __name__ == '__main__':
-    logging.basicConfig(filename='exporter.log', format='%(asctime)s %(message)s', level=logging.WARNING)
+    logging.basicConfig(filename='exporter.log', format='%(asctime)s %(message)s', level=logging.INFO)
     manager = Manager()
     current_tasks = manager.Value('i', 0)
     movie_states = manager.dict()
@@ -873,4 +928,6 @@ if __name__ == '__main__':
     locks = {"movie": movie_lock, "music": music_lock, "book": book_lock}
     BIDS = gen_bids()
     clear_files()
+    if CUSTOM_COOKIE:
+        logging.info('Custom cookies detected')
     app.run('0.0.0.0', 8000)
